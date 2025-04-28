@@ -1,64 +1,89 @@
-name: Test and Deploy
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [new-feature]
+    branches: [main, new-feature]
   pull_request:
-    branches: [new-feature]
+    branches: [main]
 
 jobs:
-  test:
+  validate-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # 1. Тесты Python-приложения
+      # 1. Проверка конфигураций
+      - name: Validate Docker Compose
+        run: docker-compose config
+
+      - name: Test Nginx config
+        uses: docker://nginx:alpine
+        with:
+          entrypoint: /bin/sh
+          args: -c "nginx -t -c /github/workspace/nginx/app.conf"
+
+      # 2. Тестирование Python приложения
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
       - name: Install dependencies
+        working-directory: ./simple_python_app
         run: |
-          pip install -r simple_python_app/requirements.txt
+          pip install -r requirements.txt
           pip install pytest bandit safety
 
       - name: Run unit tests
         working-directory: ./simple_python_app
         run: pytest -v app.py
 
-      - name: Security check (Bandit)
+      - name: Security checks
         working-directory: ./simple_python_app
-        run: bandit -r .
+        run: |
+          bandit -r .
+          safety check -r requirements.txt
 
-      - name: Check vulnerabilities
-        run: safety check -r simple_python_app/requirements.txt
-
-      # 2. Проверка Nginx конфига
-      - name: Test Nginx configuration
-        uses: docker://nginx:alpine
-        with:
-          entrypoint: /bin/sh
-          args: -c "nginx -t -c /github/workspace/nginx/app.conf"
-
-  deploy:
-    needs: test
-    if: github.event_name == 'push'
+  deploy-production:
+    needs: validate-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install SSH key
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.7.0
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
 
-      - name: Deploy to server
+      - name: Deploy to Production
         run: |
-          ssh -o StrictHostKeyChecking=no root@${{ secrets.SERVER_IP }} "
-            cd /compose
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.PROD_SERVER_IP }} "
+            cd /compose-production
+            git fetch origin main
+            git reset --hard origin/main
+            docker-compose -f docker-compose.yml down
+            docker-compose -f docker-compose.yml up -d
+          "
+
+  deploy-staging:
+    needs: validate-and-test
+    if: github.ref == 'refs/heads/new-feature' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+
+      - name: Deploy to Staging
+        run: |
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.STAGING_SERVER_IP }} "
+            cd /compose-staging
             git fetch origin new-feature
             git reset --hard origin/new-feature
-            docker-compose down
-            docker-compose up -d --build
+            docker-compose -f docker-compose.yml down
+            docker-compose -f docker-compose.yml up -d --build
           "
