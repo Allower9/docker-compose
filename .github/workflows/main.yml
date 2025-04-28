@@ -1,0 +1,64 @@
+name: Test and Deploy
+
+on:
+  push:
+    branches: [new-feature]
+  pull_request:
+    branches: [new-feature]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Тесты Python-приложения
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r simple_python_app/requirements.txt
+          pip install pytest bandit safety
+
+      - name: Run unit tests
+        working-directory: ./simple_python_app
+        run: pytest -v app.py
+
+      - name: Security check (Bandit)
+        working-directory: ./simple_python_app
+        run: bandit -r .
+
+      - name: Check vulnerabilities
+        run: safety check -r simple_python_app/requirements.txt
+
+      # 2. Проверка Nginx конфига
+      - name: Test Nginx configuration
+        uses: docker://nginx:alpine
+        with:
+          entrypoint: /bin/sh
+          args: -c "nginx -t -c /github/workspace/nginx/app.conf"
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install SSH key
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy to server
+        run: |
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.SERVER_IP }} "
+            cd /compose
+            git fetch origin new-feature
+            git reset --hard origin/new-feature
+            docker-compose down
+            docker-compose up -d --build
+          "
