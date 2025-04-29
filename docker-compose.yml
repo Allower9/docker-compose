@@ -1,53 +1,46 @@
+version: '3.8'
+
 services:
   web:
     image: nginx:alpine
     ports:
-      - "8049:80"  # Проброс порта 8049 на 80
+      - "8049:80"                     # Снаружи 8049 → внутри 80
     networks:
       - frontend-net
     volumes:
-      - type: bind
-        source: ./nginx/app.conf
-        target: /etc/nginx/conf.d/default.conf
-        read_only: true
-      - type: bind
-        source: ./nginx/index.html
-        target: /usr/share/nginx/html/index.html
-        read_only: true
-      - type: bind
-        source: ./nginx/styles.css
-        target: /usr/share/nginx/html/styles.css
-        read_only: true
-      - type: bind
-        source: ./nginx/script.js
-        target: /usr/share/nginx/html/script.js
-        read_only: true
+      # 1) Конфиг nginx
+      - ./nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
+      # 2) Статические файлы
+      - ./nginx/index.html:/usr/share/nginx/html/index.html:ro
+      - ./nginx/styles.css:/usr/share/nginx/html/styles.css:ro
+      - ./nginx/script.js:/usr/share/nginx/html/script.js:ro
     depends_on:
       - simple_python_app
 
   simple_python_app:
+    build: ./simple_python_app      # собираем образ из вашего Dockerfile
     image: simple_python_app:latest
-    build: ./simple_python_app  # Убедитесь, что у вас есть Dockerfile в этой директории
+    ports:
+      - "5000:8000"                  # снаружи 5000 → внутри 8000 (uvicorn)
     environment:
       API_DB_HOST: db
-      API_DB_PASS: apipass
+      API_DB_PORT: "5432"
       API_DB_NAME: api
       API_DB_USER: apiuser
+      API_DB_PASS: apipass
     networks:
       - frontend-net
       - backend-net
-    ports:
-      - "5000:8000"  # Проброс порта 5000 на 8000 (порт, на котором работает Uvicorn)
     depends_on:
       db:
-        condition: service_healthy
+        condition: service_healthy   # ждем, пока БД будет здоровой
 
   db:
     image: postgres:16.2-alpine
     environment:
-      POSTGRES_PASSWORD: apipass
       POSTGRES_DB: api
       POSTGRES_USER: apiuser
+      POSTGRES_PASSWORD: apipass
     volumes:
       - dbdata:/var/lib/postgresql/data
     networks:
@@ -58,7 +51,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-      start_interval: 1s
 
 networks:
   frontend-net:
