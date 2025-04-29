@@ -1,27 +1,40 @@
 name: Deploy to Production
 
+# Запускаем на каждый пуш в ветку main
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   deploy:
+    name: 🚀 Deploy
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      # 1) Клонируем вашу репу
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up SSH
-      uses: webfactory/ssh-agent@v0.7.0
-      with:
-        ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+      # 2) Запускаем ssh-агент и добавляем приватный ключ из Secrets
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
 
-    - name: Deploy to production server
-      run: |
-        ssh -o StrictHostKeyChecking=no root@${{ secrets.PROD_SERVER_IP }} << 'EOF'
-          cd ~/compose
-          git pull origin main
-          docker compose down
-          docker compose up --build -d
-        EOF
+      # 3) Подключаемся по SSH к серверу и делаем деплой
+      - name: Deploy over SSH
+        run: |
+          ssh -o StrictHostKeyChecking=no root@${{ secrets.PROD_SERVER_IP }} << 'EOF'
+            # Переходим в директорию проекта
+            cd /compose
+
+            # Подтягиваем свежие изменения
+            git pull origin main
+
+            # Останавливаем старые контейнеры
+            docker-compose down
+
+            # Запускаем с пересборкой
+            docker-compose up -d --build
+          EOF
