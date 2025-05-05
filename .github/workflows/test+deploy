@@ -1,0 +1,97 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  python-tests:
+    name: 🐍 Python API Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16.2-alpine
+        env:
+          POSTGRES_DB: api_test
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        pip install -r simple_python_app/requirements.txt
+        pip install pytest httpx
+
+    - name: Run Python tests
+      env:
+        TEST_DB_HOST: localhost
+        TEST_DB_PORT: 5432
+        TEST_DB_NAME: api_test
+        TEST_DB_USER: testuser
+        TEST_DB_PASS: testpass
+      run: |
+        pytest -v simple_python_app/tests/
+
+  html-tests:
+    name: 🌐 HTML Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install HTML validator
+      run: npm install -g html-validate
+
+    - name: Validate HTML syntax
+      run: |
+        html-validate --config .htmlvalidate.json nginx/index.html
+
+    - name: Check for broken links
+      uses: gaurav-nelson/github-action-markdown-link-check@v1
+      with:
+        folder-path: "nginx/"
+        file-extension: "html"
+        check-modified-files-only: false
+
+  deploy:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [python-tests, html-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: SSH Deploy
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.PROD_SERVER_IP }}
+        username: root
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        script: |
+          cd /compose
+          git pull origin main
+          docker-compose down
+          docker-compose up -d --build
