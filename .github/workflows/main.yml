@@ -27,7 +27,7 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no root@${{ secrets.PROD_SERVER_IP }} << 'EOF'
             # Переходим в директорию проекта
-            cd /compose
+            cd /root/docker-compose
 
             # Подтягиваем свежие изменения
             git pull origin main
